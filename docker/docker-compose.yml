@@ -1,0 +1,125 @@
+version: "3.9"
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: alphasignal_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: alphasignal
+      POSTGRES_USER: alphasignal
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alphasignal"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: alphasignal_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI ─────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: alphasignal_api
+    restart: unless-stopped
+    command: uvicorn dashboard.api:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: postgresql://alphasignal:${POSTGRES_PASSWORD:-password}@db:5432/alphasignal
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    env_file: ../.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - models_data:/app/models/saved
+      - logs_data:/app/logs
+
+  # ── Streamlit Dashboard ─────────────────────────────────────────────────────
+  dashboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: alphasignal_dashboard
+    restart: unless-stopped
+    command: streamlit run dashboard/app.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true
+    environment:
+      DATABASE_URL: postgresql://alphasignal:${POSTGRES_PASSWORD:-password}@db:5432/alphasignal
+      REDIS_URL: redis://redis:6379/0
+    env_file: ../.env
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+    volumes:
+      - models_data:/app/models/saved
+      - logs_data:/app/logs
+
+  # ── Celery Worker ───────────────────────────────────────────────────────────
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: alphasignal_worker
+    restart: unless-stopped
+    command: celery -A alerting.celery_worker worker --loglevel=info --concurrency=2
+    environment:
+      DATABASE_URL: postgresql://alphasignal:${POSTGRES_PASSWORD:-password}@db:5432/alphasignal
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    env_file: ../.env
+    depends_on:
+      - redis
+      - db
+    volumes:
+      - models_data:/app/models/saved
+      - logs_data:/app/logs
+
+  # ── Celery Beat Scheduler ───────────────────────────────────────────────────
+  beat:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: alphasignal_beat
+    restart: unless-stopped
+    command: celery -A alerting.celery_worker beat --loglevel=info
+    environment:
+      DATABASE_URL: postgresql://alphasignal:${POSTGRES_PASSWORD:-password}@db:5432/alphasignal
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    env_file: ../.env
+    depends_on:
+      - redis
+    volumes:
+      - logs_data:/app/logs
+
+volumes:
+  postgres_data:
+  models_data:
+  logs_data:
