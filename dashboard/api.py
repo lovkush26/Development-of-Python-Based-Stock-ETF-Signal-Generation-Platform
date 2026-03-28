@@ -1,4 +1,4 @@
-﻿import sys, os
+import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
@@ -19,7 +19,7 @@ app = FastAPI(title="AlphaSignal API", version="2.4.0", docs_url="/api/docs")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+    allow_origins=["*", "https://alphasignal-ui.vercel.app"], allow_methods=["*"], allow_headers=["*"],
 )
 
 _runner = None
@@ -257,3 +257,4 @@ def run_and_alert(tickers: str = Query(default=""), min_confidence: float = Quer
             notifier.send_signal_alert(s["ticker"],s["signal"],s["confidence"],s["price"])
             alerted.append(s)
     return {"scanned":len(signals_data),"alerted":len(alerted),"alerts":alerted}
+
