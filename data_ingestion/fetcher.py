@@ -20,8 +20,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 import requests
 
-from config.settings import get_settings
-settings = get_settings()
+from config.settings import settings
 from utils.logger import log
 
 
@@ -32,6 +31,15 @@ class MarketDataFetcher:
         self.av_key = settings.alpha_vantage_api_key
         self.polygon_key = settings.polygon_api_key
         self._cache: Dict[str, pd.DataFrame] = {}
+        # Custom session to bypass server-side IP blocks
+        self._session = requests.Session()
+        self._session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+        })
 
     # ── Primary: Yahoo Finance ───────────────────────────────────────────────
 
@@ -61,7 +69,7 @@ class MarketDataFetcher:
 
         try:
             log.info(f"Fetching {ticker} from Yahoo Finance [{period}/{interval}]")
-            tkr = yf.Ticker(ticker)
+            tkr = yf.Ticker(ticker, session=self._session)
             df = tkr.history(period=period, interval=interval)
 
             if df.empty:
@@ -95,7 +103,7 @@ class MarketDataFetcher:
     def get_live_quote(self, ticker: str) -> Dict:
         """Get current price and basic stats."""
         try:
-            tkr = yf.Ticker(ticker)
+            tkr = yf.Ticker(ticker, session=self._session)
             info = tkr.fast_info
             return {
                 "ticker": ticker,
@@ -185,6 +193,3 @@ class MarketDataFetcher:
     def clear_cache(self):
         self._cache.clear()
         log.info("Data cache cleared")
-
-
-
